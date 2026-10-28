@@ -902,7 +902,7 @@ ggplot(parl_data_example) +
 
 - Sequential analysis allows for "safe" inference
 
-- Modern tools use TSMs
+- Modern tools use test supermartingales (TSMs)
 
 - Complex inference problems can be tackled sequentially with
   finite-sample guarantees.
