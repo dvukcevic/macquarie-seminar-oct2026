@@ -927,6 +927,8 @@ Papers :bookmark_tabs: [Ek et al. (2023; 2024)](#references)
 
 Software :minidisc: <https://github.com/aekh/AWAIRE>
 
+![](images/qrcode_dvukcevic-github-io.png)
+
 ## References :books: {#references .smaller}
 
 -   Chugg, Ramdas, Grünwald (2026). [E-values as statistical evidence: A
