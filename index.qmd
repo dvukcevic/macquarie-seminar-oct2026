@@ -1,0 +1,1251 @@
+---
+title: "Verifying elections with anytime-valid methods"
+subtitle: "...and an intro to sequential analysis"
+institute: "Statistics seminar, Macquarie University"
+date: "29 October 2026"
+date-format: "D MMMM YYYY"
+author: "Damjan Vukcevic"
+format:
+  presentation-revealjs+letterbox:
+    from: markdown+emoji
+    self-contained: false
+    #self-contained: true
+    #self-contained-math: true
+    title-slide-attributes:
+      data-background-image: "images/bg-07.png"
+---
+
+# Overview
+
+## Overview
+
+:repeat: Sequential analysis 
+
+:ballot_box: Auditing preferential elections
+
+## Acknowledgements :heart_decoration:
+
+::::: columns
+::: {.column width="33%"}
+-   Michelle Blom
+-   Alexander Ek
+-   Floyd Everest
+:::
+
+::: {.column width="33%"}
+-   Jack Freestone
+-   Dania Freidgeim
+-   Dennis Leung
+:::
+
+::: {.column width="33%"}
+-   Philip Stark
+-   Peter Stuckey
+-   Vanessa Teague
+:::
+:::::
+
+. . .
+
+### Australian Research Council :moneybag:
+
+- Discovery Project [DP220101012](https://dataportal.arc.gov.au/NCGP/Web/Grant/Grant/DP220101012)
+- OPTIMA ITTC [IC200100009](https://dataportal.arc.gov.au/NCGP/Web/Grant/Grant/IC200100009)
+
+# Sequential analysis
+
+## Sequential probability ratio test (SPRT)
+
+::::: columns
+::: {.column width="40%"}
+<!-- https://en.wikipedia.org/wiki/File:Abraham_Wald_in_his_youth.jpg -->
+
+![](images/Abraham_Wald_in_his_youth.jpg){width="80%"}
+:::
+
+::: {.column width="60%"}
+Developed by [Wald (1945)](#references)
+
+Birth of sequential analysis
+:::
+:::::
+
+## Binary data example
+
+::::: columns
+::: {.column width="70%"}
+Data ($X_i$): $$0, 0, 1, 1, 0, 1, \dots$$
+
+Hypotheses: $$\begin{cases}
+    H_0\colon p = p_0 \\
+    H_1\colon p = p_1
+    \end{cases}$$
+:::
+
+::: {.column width="30%"}
+<!-- https://www.wannapik.com/vectors/3720 -->
+
+![](images/coin_flip_smaller.png)
+:::
+:::::
+
+## Binary data example
+
+Test statistic: $$S_t = \frac{L_t(p_1)}{L_t(p_0)}
+          = \frac{\Pr(X_1, \dots, X_t \mid H_1)}
+                 {\Pr(X_1, \dots, X_t \mid H_0)}
+          = \frac{p_1^{Y_t} (1 - p_1)^{t - Y_t}}
+                 {p_0^{Y_t} (1 - p_0)^{t - Y_t}}$$
+
+Where: $Y_t = \sum_{i=1}^t X_i$
+
+## Binary data example
+
+```{r}
+#| label: sprt-simulation
+
+set.seed(1596)
+
+# Set parameters.
+p_true <- 0.6  # true proportions
+n <- 50        # maximum sample size
+
+# SPRT settings.
+p0 <- 0.5   # null hypothesis
+p1 <- 0.7   # alternative hypothesis
+a <- 0.1    # type I error
+b <- 0.1    # type II error
+bounds <- c(b / (1 - a), (1 - b) / a)
+
+# Simulate data.
+x <- rbinom(n, 1, p_true)
+y <- cumsum(x)
+ns <- 1:n
+s <- p1^y * (1 - p1)^(ns - y) / (p0^y * (1 - p0)^(ns - y))
+p.hat <- y / ns
+```
+
+```{r}
+#| label: sprt-binary-example-statistic
+#| fig-width: 6
+#| fig-height: 4
+
+par(mar = c(5, 5, 2, 5))
+plot(ns, s, type = "n", las = 1,
+     xlim = c(0, n + 10),
+     ylim = range(0, bounds),
+     xlab = expression("Sample size, " * t),
+     ylab = expression("Test statistic, " * S[t]))
+grid()
+#abline(h = 1, lty = 3, lwd = 1.5, col = "skyblue")
+#axis(2, at = 1, las = 1)
+lines(ns, s, lwd = 2, col = "blue")
+points(tail(ns, 1), tail(s, 1), pch = 19, cex = 1.5, col = "blue")
+```
+
+## Binary data example
+
+Stopping rule: $$\begin{cases}
+    S_t \leqslant \frac{\beta}{1 - \alpha} & \Rightarrow \text{accept } H_0 \\
+    S_t \geqslant \frac{1 - \beta}{\alpha} & \Rightarrow \text{accept } H_1 \\
+    \text{otherwise} & \Rightarrow \text{keep sampling}
+    \end{cases}$$
+
+. . .
+
+Error control:
+
+-   Type 1 error $\leqslant \alpha$
+-   Type 2 error $\leqslant \beta$
+
+## Binary data example
+
+```{r}
+#| label: sprt-binary-example-statistic-with-bounds
+#| fig-width: 6
+#| fig-height: 4
+
+par(mar = c(5, 5, 2, 5))
+plot(ns, s, type = "n", las = 1,
+     xlim = c(0, n + 10),
+     ylim = range(0, bounds),
+     xlab = expression("Sample size, " * t),
+     ylab = expression("Test statistic, " * S[t]))
+grid()
+lines(ns, s, lwd = 2, col = "blue")
+abline(h = bounds, lty = 2, lwd = 1, col = "magenta")
+points(tail(ns, 1), tail(s, 1), pch = 19, cex = 1.5, col = "blue")
+axis(4, at = bounds, expression(frac(beta, (1 - alpha)), frac((1 - beta), alpha)),
+     las = 1, col.axis = "magenta")
+```
+
+## Sample size distribution
+
+```{r}
+#| label: sprt-sample-size-calculations
+
+# Function to simulate one SPRT run.
+simulate_sprt <- function(true_p) {
+  logLR <- 0
+  n <- 0
+  
+  repeat {
+    x <- rbinom(1, 1, true_p)
+    n <- n + 1
+    
+    # Update log-likelihood ratio.
+    logLR <- logLR + log(p1 / p0) * x + log((1 - p1)/(1 - p0)) * (1 - x)
+    
+    # Check stopping conditions.
+    if (logLR >= log(bounds[2])) return(n)  # accept H1
+    if (logLR <= log(bounds[1])) return(n)  # accept H0
+  }
+}
+
+# Simulate sample sizes
+set.seed(33)
+Nsim <- 1e4
+
+#sample_sizes_p0 <- replicate(Nsim, simulate_sprt(p0))
+sample_sizes_p1 <- replicate(Nsim, simulate_sprt(p1))
+
+# Sample size for a corresponding fixed-sample size test.
+#
+# Testing:
+#    H0: p = p0
+#    H1: p > p0
+#
+# With a given significance level (a) and power (1 - b) at p = p1.
+fixed_n_one_sided <- function() {
+  stopifnot(p1 > p0)
+  
+  z_alpha <- qnorm(1 - a)  # critical value for one-sided test
+  z_beta  <- qnorm(1 - b)  # power = Pr(reject | p = p1)
+  
+  # Normal approximation sample size formula.
+  n <- ((z_alpha * sqrt(p0 * (1 - p0)) +
+         z_beta  * sqrt(p1 * (1 - p1)))^2) / (p1 - p0)^2
+  
+  return(ceiling(n))
+}
+n_fixed <- fixed_n_one_sided()
+```
+
+```{r}
+#| label: sprt-sample-size-stats
+#| eval: false
+#| include: false
+summary(sample_sizes_p0)
+summary(sample_sizes_p1)
+mean(sample_sizes_p0 < n_fixed)
+mean(sample_sizes_p1 < n_fixed)
+```
+
+::::: columns
+::: {.column width="60%"}
+```{r}
+#| label: sprt-sample-size
+#| fig-width: 5
+#| fig-height: 4
+#| out-width: "100%"
+
+# Plot the empirical distribution.
+par(mar = c(5, 4, 0, 0))
+hist(sample_sizes_p1,
+     breaks = 50,
+     probability = TRUE,
+     main = "",
+     xlab = "Sample size at stopping",
+     las = 1,
+     col = "lightblue",
+     border = "white")
+grid()
+abline(v = n_fixed, lwd = 2, col = "magenta")
+```
+:::
+
+::: {.column width="40%"}
+-   Parameters:
+
+    -   $p_0 = 0.5$
+    -   $p_1 = 0.7 = p$
+    -   $\alpha = \beta = 0.1$
+
+-   $n = 38$ for fixed-$n$ test with same power
+
+-   SPRT often stops earlier
+:::
+:::::
+
+## 
+
+::::: columns
+::: {.column width="50%"}
+### Benefits :thumbsup:
+
+-   Safe: can "peek" :eye: at the data
+-   Efficient: small sample sizes
+-   Can "accept" $H_0$
+-   Principled “no decision” is possible
+:::
+
+::: {.column width="50%"}
+### Disadvantages :thumbsdown:
+
+-   Operational planning more complex
+-   Sample size unknown in advance
+-   Sample size could be very large
+-   Only simple vs simple (for now...)
+:::
+:::::
+
+## SPRT in general
+
+$$H_0\colon X \sim f_0(\cdot) \quad \text{vs} \quad
+  H_1\colon X \sim f_1(\cdot)$$
+
+Test statistic: $$S_t = \frac{f_1(X_1, X_2, \dots, X_t)}
+                 {f_0(X_1, X_2, \dots, X_t)}$$
+
+Test statistic, with iid observations:
+$$S_t = \prod_{i=1}^t \frac{f_1(X_i)}{f_0(X_i)}
+          = S_{t - 1} \times \frac{f_1(X_t)}{f_0(X_t)}$$
+
+## "Tests of power one"
+
+::::: columns
+::: {.column width="45%"}
+-   Set $\beta = 0$
+-   Stopping rule:\
+    Reject $H_0$ once $S_t \geqslant 1 / \alpha$
+-   Never "accept" $H_0$
+-   No type II error (power = 1), but might have $n = \infty$.
+:::
+
+::: {.column width="55%"}
+```{r}
+#| label: sprt-single-boundary
+#| fig-width: 5
+#| fig-height: 3.5
+#| out-width: "100%"
+
+# New boundary.
+bound1 <- 1 / a
+
+# Draw plot.
+par(mar = c(4, 4, 1, 2))
+plot(ns, s, type = "n", las = 1,
+     ylim = range(0, bound1 + 1),
+     xlim = c(0, 80),
+     xlab = expression("Sample size, " * t),
+     ylab = expression("Test statistic, " * S[t]))
+grid()
+lines(ns, s, lwd = 2, col = "blue")
+abline(h = bound1, lty = 2, lwd = 1, col = "magenta")
+points(tail(ns, 1), tail(s, 1), pch = 19, cex = 1.5, col = "blue")
+axis(2, at = 1, las = 1)
+axis(4, at = bound1, expression(frac(1, alpha)),
+     las = 1, col.axis = "magenta")
+```
+:::
+:::::
+
+## Why is the SPRT "safe"?
+
+##  {.full}
+
+```{r}
+#| label: martingales-simulation
+
+set.seed(142)
+
+# Set parameters.
+n <- 12  # maximum sample size
+
+# Simulate data.
+x0 <- rbinom(n, 1, p0)
+x1 <- rbinom(n, 1, p0 * 0.9)
+x2 <- rbinom(n, 1, p1)
+y0 <- cumsum(x0)
+y1 <- cumsum(x1)
+y2 <- cumsum(x2)
+ns <- 1:n
+s0 <- p1^y0 * (1 - p1)^(ns - y0) / (p0^y0 * (1 - p0)^(ns - y0))
+s1 <- p1^y1 * (1 - p1)^(ns - y1) / (p0^y1 * (1 - p0)^(ns - y1))
+s2 <- p1^y2 * (1 - p1)^(ns - y2) / (p0^y2 * (1 - p0)^(ns - y2))
+```
+
+```{r}
+#| label: plot-martingales-setup
+
+# Function to draw arrows coming out of a point.
+draw_arrows <- function(
+  x0 = 0, y0 = 0,
+  angles = c(-20, 0, 20),
+  length = c(2, 2.5, 2),
+  col = "grey40",
+  lwd = 1
+) {
+  # Compute endpoints.
+  x1 <- x0 + length * cos(angles * pi/180)
+  y1 <- y0 + length * sin(angles * pi/180)
+  
+  # Draw arrows.
+  for (i in seq_along(angles)) {
+    arrows(x0, y0, x1[i], y1[i],
+           length = 0.1, col = col, lwd = lwd)
+  }
+  
+  # Draw starting point.
+  points(x0, y0, pch = 19, cex = 1.5, col = "blue")
+}
+```
+
+::::: columns
+::: {.column width="50%"}
+### Martingale
+
+```{r}
+#| label: plot-martingale
+#| fig-width: 5
+#| fig-height: 3.5
+#| out-width: "100%"
+
+par(mar = c(4, 3, 1, 1))
+
+plot(ns, s0, type = "n", las = 1,
+     xlim = c(0, n + 8),
+     ylim = range(0, s0),
+     xlab = expression(t),
+     ylab = "")
+grid()
+lines(ns, s0, lwd = 2, col = "blue")
+draw_arrows(tail(ns, 1), tail(s0, 1))
+```
+
+"Stays the same" on average
+:::
+
+::: {.column width="50%"}
+### Supermartingale :supervillain:
+
+```{r}
+#| label: plot-supermartingale
+#| fig-width: 5
+#| fig-height: 3.5
+#| out-width: "100%"
+
+par(mar = c(4, 3, 1, 1))
+
+plot(ns, s1, type = "n", las = 1,
+     xlim = c(0, n + 8),
+     ylim = range(0, s1),
+     xlab = expression(t),
+     ylab = "")
+grid()
+lines(ns, s1, lwd = 2, col = "blue")
+draw_arrows(tail(ns, 1), tail(s1, 1),
+            angles = c(-10, -5, 0, 5),
+            length = 1.5)
+```
+
+"Stays the same or reduces in value" on average
+:::
+:::::
+
+## (Super)martingales
+
+Martingale condition:
+$$\mathbb{E}\left(S_{t+1} \mid X_1, \dots, X_t\right) = S_t$$
+
+Supermartingale condition:
+$$\mathbb{E}\left(S_{t+1} \mid X_1, \dots, X_t\right) \leqslant S_t$$
+
+
+## Ville's inequality
+
+Let $S_0, S_1, S_2, \dots$ be a **test supermartingale** (TSM):\
+has non-negative terms ($S_i \geqslant 0$) and starting value $S_0 = 1$.
+
+. . .
+
+For any $\alpha > 0$,
+$$\Pr\left(\max_t (S_t) \geqslant \frac{1}{\alpha}\right) \leqslant \alpha$$
+
+## Tests based on martingales
+
+-   $S_t$ should be a **test supermartingale** (TSM) under $H_0$
+-   $S_t$ should **grow quickly** under $H_1$
+
+::::: columns
+::: {.column width="50%"}
+```{r}
+#| label: plot-process-h0
+#| fig-width: 5
+#| fig-height: 3.5
+#| out-width: "100%"
+
+par(mar = c(4, 4.5, 2, 1))
+
+plot(ns, s1, type = "n", las = 1,
+     xlim = c(0, n + 3),
+     ylim = range(0, s1, s2 + 0.5),
+     main = expression(S[t] * " under " * H[0]),
+     xlab = expression(t),
+     ylab = expression("Test statistic, " * S[t]))
+grid()
+lines(c(0, ns), c(1, s1), lwd = 2, col = "blue")
+points(tail(ns, 1), tail(s1, 1), pch = 19, cex = 1.5, col = "blue")
+```
+:::
+
+::: {.column width="50%"}
+```{r}
+#| label: plot-process-h1
+#| fig-width: 5
+#| fig-height: 3.5
+#| out-width: "100%"
+
+par(mar = c(4, 4.5, 2, 1))
+
+plot(ns, s2, type = "n", las = 1,
+     xlim = c(0, n + 3),
+     ylim = range(0, s1, s2 + 0.5),
+     main = expression(S[t] * " under " * H[1]),
+     xlab = expression(t),
+     ylab = expression("Test statistic, " * S[t]))
+grid()
+lines(c(0, ns), c(1, s2), lwd = 2, col = "blue")
+points(tail(ns, 1), tail(s2, 1), pch = 19, cex = 1.5, col = "blue")
+```
+:::
+:::::
+
+## Tests based on martingales
+
+Decision rule:
+
+-   Reject $H_0$ if $S_t \geqslant 1 / \alpha$
+-   Otherwise keep sampling (or give up)
+
+Ville's inequality $\Rightarrow$ **anytime-valid** type I error control
+
+Growth rate under $H_1$ $\rightarrow$ statistical efficiency ("power")
+
+## The SPRT is a martingale
+
+At time $t$: $$\mathbb{E}_{H_0} \left(\frac{f_1(X_t)}{f_0(X_t)}\right)
+      = \int \frac{f_1(x)}{f_0(x)} f_0(x) \, dx
+      = \int f_1(x) \, dx = 1$$
+
+. . .
+
+This implies the martingale condition.
+
+## Beyond simple hypotheses
+
+$$H_0\colon \theta = \theta_0 \quad \text{vs} \quad
+  H_1\colon \theta \in \mathcal{A}$$
+
+. . .
+
+Plug-in strategy:
+$$S_t = S_{t-1} \times \frac{f(X_t \mid \hat\theta_t)}{f(X_t \mid \theta_0)}$$
+$$\hat\theta_t = a(X_1, X_2, \dots, X_{t-1}) \in \mathcal{A}$$
+
+## Beyond simple hypotheses
+
+$$H_0\colon \theta = \theta_0 \quad \text{vs} \quad
+  H_1\colon \theta \in \mathcal{A}$$
+
+Mixture strategy:
+$$S_t = S_{t-1} \times \frac{\int_{\mathcal{A}} f(X_t \mid \theta) \, g_t(\theta) \, d\theta}{f(X_t \mid \theta_0)}$$
+$$g_t(\theta) \text{ is a distribution over } \mathcal{A}$$
+$$g_t(\theta) \text{ can depend on } X_1, X_2, \dots, X_{t-1}$$
+
+## Further reading
+
+[Ramdas et al. (2023)](#references)
+
+"Safe anytime-valid inference" (SAVI)
+
+# Auditing preferential elections
+
+## Counting the votes
+
+![](images/AEC-HoR-election-night-opening.jpg)
+
+## Counting the votes
+
+![](images/AEC-HoR-counting-1.jpg)
+
+## Counting the votes
+
+![](images/AEC-Centralised-Senate-Scrutiny-papers-1.jpg)
+
+## What can go wrong?
+
+-   Human error
+-   Machine malfunction
+-   Malicious interference
+
+. . .
+
+More automation $\rightarrow$ less scrutiny
+
+## Election audits
+
+Goal:
+
+-   Detect (and correct) wrong election outcomes
+
+. . .
+
+How: **statistics!** :bar_chart:
+
+-   Sample the ballot papers
+-   Infer the winners
+-   Use sequential tests
+
+## Two-candidate example
+
+Election: **Albo** vs Dutton :wrestling:
+
+. . .
+
+$p = \text{Proportion of votes for Albo}$
+
+. . .
+
+$$\begin{cases}
+H_0\colon p \leqslant 0.5, & \text{Albo did not win} \\
+H_1\colon p  >        0.5, & \text{Albo won}
+\end{cases}$$
+
+## Two-candidate example
+
+SPRT with a plug-in estimator of $p$:
+
+$$S_t = S_{t-1} \times \frac{\Pr(X_t \mid \hat{p}_t)}{\Pr(X_t \mid p = 0.5)}$$
+$$\hat{p}_t = h(X_1, \dots, X_{t-1}) \in (0.5, 1]$$
+
+. . .
+
+"ALPHA supermartingale" ([Stark 2023](#references))
+
+## Preferential elections
+
+![](images/irv-ballot-small.png)
+
+## Voting
+
+**Rank** the candidates in order of preference.
+
+::: callout-tip
+### Examples
+
+-   \(1\) Thomas, (2) Houying, (3) Jack
+-   \(1\) Houying, (2) Thomas, (3) Jack
+-   \(1\) Jack, (2) Thomas
+-   \(1\) Houying
+:::
+
+## Counting the votes
+
+Iterative algorithm:
+
+-   Eliminate least preferred candidate; redistribute their votes
+-   Last candidate standing is the winner.
+
+. . .
+
+This produces an **elimination order**.
+
+::: callout-tip
+### Example
+
+\[Jack, Houying, **Thomas**\]
+
+Thomas is declared the winner
+:::
+
+## Auditing
+
+$H_0 =$ "someone else won the election"
+
+. . .
+
+$H_0$ includes all **elimination orders** with\
+**alternative winners** ("alt-orders").
+
+. . .
+
+::: callout-tip
+### Example alt-orders
+
+\[Thomas, Houying, Jack\]
+
+\[Thomas, Jack, Houying\]
+
+\[Houying, Thomas, Jack\]
+
+\[Jack, Thomas, Houying\]
+:::
+
+## Auditing challenge
+
+Need to reject **every** all-order
+
+. . .
+
+$k$ candidates $\Rightarrow$ $\sim k!$ ballot types\
+$k$ candidates $\Rightarrow$ $\sim k!$ alt-orders
+
+. . .
+
+::: callout-note
+### Challenges
+
+-   High-dimensional parameter space
+-   Complex boundary between $H_0$ and $H_1$
+:::
+
+## Auditing strategy
+
+1.  Decompose $H_0$ into simpler, 1-dimensional statements
+2.  Test each statement separately
+3.  Combine test results into a single decision
+
+## Null decomposition
+
+- Enumerate all alt-orders: $1, \dots, m$
+
+- $H_0^i =$ "alt-order $i$ is true"
+
+- $H_0 = H_0^1 \cup H_0^2 \cup \dots \cup H_0^m$ 
+
+- Must reject **every** alt-order
+
+## Simple statements ("requirements")
+
+Example:
+
+> "Thomas has more votes than Houying assuming that only\
+> candidates in the set $\mathcal{S}$ remain standing."
+
+. . .
+
+Notation:
+
+- DB(Thomas > Houying, $\mathcal{S}$)
+
+. . .
+
+Equivalent to a two-candidate election.
+
+Can test using ALPHA.
+
+## Testing an alt-order
+
+Alt-order: \[Thomas, Houying, Jack\]
+
+. . .
+
+Requirements:
+
+- DB(Houying > Thomas, {T,H,J})
+- DB(Jack > Thomas, {T,H,J})
+- DB(Jack > Houying, {H,J})
+
+. . .
+
+Alt-order is true $\Leftrightarrow$ **all** of its requirements are true
+
+Reject **at least one** requirement $\Rightarrow$ reject the alt-order
+
+## Alt-orders as intersections
+
+Alt-order $i$ is an intersection of its requirements:
+$$H_0^i = R_i^1 \cap R_i^2 \cap \dots \cap R_i^{r_i}$$
+
+. . .
+
+Simpler, more generic notation:
+$$H = H^1 \cap H^2 \cap \dots \cap H^r$$
+
+## Adaptive weighting (for intersections)
+
+::::: columns
+::: {.column width="50%"}
+**Base TSM**: for $H^j$
+
+$$S_{j,t} = \prod_{i = 1}^t s_{j, i}$$
+:::
+
+::: {.column width="50%"}
+**Intersection TSM**: for $H$
+
+$$S_t = \prod_{i = 1}^t \frac{\sum_j w_{j, i} \, s_{j, i}}{\sum_jw_{j, i}}$$
+:::
+:::::
+
+. . .
+
+The weights $w_{j, i}$ can depend on data up until time $i - 1$.
+
+. . .
+
+How to choose the weights $w_{j, i}$?
+
+## Weighting schemes
+
+How to choose the weights $w_{j, i}$?
+
+Ideas:
+
+-   **Largest**: Put weight 1 on the largest base TSM so far.
+-   **Linear**: Proportional to previous value, $w_{j, i} = S_{j, i - 1}$.
+-   **Quadratic**: Proportional to square of previous value,
+    $w_{j, i} = S_{j, i - 1}^2$.
+-   Many more...
+
+Compared about 30 schemes. "Largest" was often the best.
+
+## Weighting schemes
+
+![](images/progress.png)
+
+::: footer
+[Ek et al. (2023)](#references)
+:::
+
+## Scaling up
+
+$k!$ alt-orders\
+$\rightarrow$ :boom: explosion of decompositions & intersections
+
+. . .
+
+Use combinatorial optimisation methods...
+
+## Suffix trees of partial alt-orders
+
+```{mermaid}
+graph TD
+    A("[...1]")   --> B("[...2,1]")
+    A("[...1]")   --> C("[...3,1]")
+    A("[...1]")   --> D("[...4,1]")
+    B("[...2,1]") --> E("[4,3,2,1]")
+    B("[...2,1]") --> F("[3,4,2,1]")
+    C("[...3,1]") --> G("[4,2,3,1]")
+    C("[...3,1]") --> H("[2,4,3,1]")
+    D("[...4,1]") --> I("[3,2,4,1]")
+    D("[...4,1]") --> J("[2,3,4,1]")
+```
+
+## Incremental expansion and pruning
+
+```{mermaid}
+graph TD
+    A("[...1]")   --> B("[...2,1]")
+    A("[...1]")   --> C("[...3,1]")
+    A("[...1]")   --> D("[...4,1]")
+    B("[...2,1]") --> E("[4,3,2,1]")
+    B("[...2,1]") --> F("[3,4,2,1]")
+
+style C fill:#fff0f5,stroke:#db7093,color:#db7093
+style D fill:#fff0f5,stroke:#db7093,color:#db7093
+```
+
+## Computational scale-up
+
+'Exhaustive' implementation: up to 6 candidates
+
+'Incremental' implementation: **55+ candidates**
+
+::: footer
+[Ek et al. (2024)](#references)
+:::
+
+## Ask Jack...
+
+Auditing parliamentary majorities
+
+```{r}
+#| label: example-parliament
+library(ggparliament)
+library(ggplot2)
+
+election_results_example <- data.frame(
+  party = c("A", "B", "C"),
+  seats = c(120, 50, 30),
+  color = c("blue", "orange", "magenta")
+)
+
+parl_data_example <- parliament_data(
+  election_data = election_results_example,
+  type = "semicircle",
+  parl_rows = 7,
+  party_seats = election_results_example$seats
+)
+
+ggplot(parl_data_example) +
+  aes(x = x, y = y, colour = party) +
+  geom_parliament_seats(size = 5, show.legend = FALSE) +
+  scale_colour_manual(values = election_results_example$color,
+                      limits = election_results_example$party) +
+  draw_majoritythreshold(n = 100, label = FALSE, type = "semicircle") +
+  theme_ggparliament()
+```
+
+## Summary
+
+- Sequential analysis allows for "safe" inference
+
+- Modern tools use TSMs
+
+- Complex inference problems can be tackled sequentially with
+  finite-sample guarantees.
+
+. . .
+
+::: callout-note
+### Other modern tools...
+
+- E-values
+- E-variables
+- E-processes
+:::
+
+# Questions?
+
+## Download
+
+Slides :desktop_computer: <https://dvukcevic.github.io/macquarie-seminar-oct2026/>
+
+Papers :bookmark_tabs: [Ek et al. (2023; 2024)](#references)
+
+Software :minidisc: <https://github.com/aekh/AWAIRE>
+
+## References :books: {#references .smaller}
+
+-   Chugg, Ramdas, Grünwald (2026). [E-values as statistical evidence: A
+    comparison to Bayes factors, likelihoods, and
+    p-values](https://arxiv.org/abs/2603.24421). *arXiv*:2603.24421.
+
+-   Ek, Blom, Stark, Stuckey, Vukcevic (2024). [Improving the Computational
+    Efficiency of Adaptive Audits of IRV
+    Elections](https://doi.org/10.1007/978-3-031-72244-8_3). In: Electronic
+    Voting. E-Vote-ID 2024. *Lecture Notes in Computer Science* 15014:37--53.
+
+-   Ek, Stark, Stuckey, Vukcevic (2023). [Adaptively Weighted Audits of
+    Instant-Runoff Voting Elections:
+    AWAIRE](https://doi.org/10.1007/978-3-031-43756-4_3). In: Electronic
+    Voting. E-Vote-ID 2023. *Lecture Notes in Computer Science* 14230:35--51.
+
+-   Ramdas, Grünwald, Vovk, Shafer (2023). [Game-Theoretic Statistics and Safe
+    Anytime-Valid Inference](https://doi.org/10.1214/23-STS894). *Statist.
+    Sci.* 38(4):576--601.
+
+-   Stark (2023). [ALPHA: Audit that learns from previously hand-audited
+    ballots](https://doi.org/10.1214/22-AOAS1646). *Ann. Appl. Stat.*
+    17(1):641--679.
+
+-   Wald (1945). [Sequential tests of statistical
+    hypotheses](https://doi.org/10.1214/aoms/1177731118). *Ann. Math. Stat.*
+    16(2):117--186.
+
+## Image sources :framed_picture: {.smaller}
+
+The [coin flipping graphic](https://www.wannapik.com/vectors/3720) was designed
+by Wannapik.
+
+The following photographs were provided by the Australian Electoral Commission
+and licensed under [CC BY
+3.0](https://creativecommons.org/licenses/by/3.0/deed.en):
+
+-   [ballot box
+    opening](https://commons.wikimedia.org/wiki/File:AEC-HoR-election-night-opening.jpg)
+
+-   [ballot
+    counting](https://commons.wikimedia.org/wiki/File:AEC-HoR-counting-1.jpg)
+
+-   [ballots in boxes at Centralised Senate
+    Scrutiny](https://commons.wikimedia.org/wiki/File:AEC-Centralised-Senate-Scrutiny-papers-1.jpg)
+
+The Higgins ballot paper (available from [The
+Conversation](https://theconversation.com/what-us-election-officials-could-learn-from-australia-about-boosting-voter-turnout-128617))
+was originally provided by [Hshook/Wikimedia
+Commons](https://en.wikipedia.org/wiki/File:2016-ballot-paper-Higgins.png) and
+is licensed under [CC BY-SA
+4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
+The [photograph of Abraham
+Wald](https://en.wikipedia.org/wiki/File:Abraham_Wald_in_his_youth.jpg) is
+freely available from Wikipedia.
+
+The photograph of the [18th century
+print](https://ark.digitalcommonwealth.org/ark:/50959/2z111h79p) is freely
+available from the Digital Commonwealth; the original sits at the Boston Public
+Library.
+
+# Appendix
+
+## Binary data example
+
+```{r}
+#| label: sprt-binary-redefine-variables
+n <- 50
+ns <- 1:n
+```
+
+::::: columns
+::: {.column width="50%"}
+```{r}
+#| label: sprt-binary-example-statistic-with-bounds-again
+#| fig-width: 5
+#| fig-height: 4.5
+#| out-width: "100%"
+
+par(mar = c(4, 4, 1, 4))
+plot(ns, s, type = "n", las = 1,
+     xlim = c(0, n + 10),
+     ylim = range(0, bounds),
+     xlab = expression("Sample size, " * t),
+     ylab = expression("Test statistic, " * S[t]))
+grid()
+lines(ns, s, lwd = 2, col = "blue")
+abline(h = bounds, lty = 2, lwd = 1.5, col = "magenta")
+points(tail(ns, 1), tail(s, 1), pch = 19, cex = 1.5, col = "blue")
+axis(4, at = bounds, las = 1, col.axis = "magenta",
+     expression(frac(beta, (1 - alpha)), frac((1 - beta), alpha)))
+```
+:::
+
+::: {.column width="50%"}
+```{r}
+#| label: sprt-binary-example-proportion
+#| fig-width: 5
+#| fig-height: 4.5
+#| out-width: "100%"
+
+# SPRT decision boundary.
+sprt_bound <- function(t, thresh) {
+  A <- log(p1 / p0)
+  B <- log((1 - p1) / (1 - p0))
+  (log(thresh) / t - B) / (A - B)
+}
+
+# Draw plot.
+ns10 <- 1:(n + 10)
+par(mar = c(4, 5, 1, 2))
+plot(ns, p.hat, type = "n", las = 1,
+     xlim = c(0, n + 10),
+     ylim = c(0, 1),
+     xlab = expression("Sample size, " * t),
+     ylab = expression("Sample proportion, " * Y[t] / t))
+grid()
+abline(h = c(p0, p1), lty = 3, lwd = 1.5, col = "black")
+lines(ns10, sprt_bound(ns10, bounds[1]), col = "magenta", lty = 2, lwd = 1.5)
+lines(ns10, sprt_bound(ns10, bounds[2]), col = "magenta", lty = 2, lwd = 1.5)
+lines(ns, p.hat, lwd = 2, col = "blue")
+points(tail(ns, 1), tail(p.hat, 1), pch = 19, cex = 1.5, col = "blue")
+axis(4, c(p0, p1), expression(p[0], p[1]), las = 1)
+```
+:::
+:::::
+
+## Martingales: origin
+
+<!-- https://ark.digitalcommonwealth.org/ark:/50959/2z111h79p -->
+
+![](images/18_17_000138_image_access_800.jpg){fig-align="left"}
+
+## Martingales: origin
+
+"Martingales": :game_die: gambling strategies from 18th century France :clubs:
+
+These strategies cannot "beat the house".
+
+*Martingales* (in mathematics): represent the :moneybag: **wealth over time**
+of a gambler playing a **fair game**.
+
+## Betting analogy
+
+Test statistic: $S_t$, a TSM under $H_0$
+
+Intrepretation:
+
+- $S_t$ is the wealth of a gambler betting against $H_0$
+- The gambler starts with $1
+- They can vary their bets based on past data.
+
+Gambler gets rich $\rightarrow$ evidence against $H_0$
+
+Ville's inequality:
+"one in a million chance of becoming a millionaire"
+
+## E-variable
+
+-   A non-negative statistic $E$ with: $$\mathbb{E}_{H_0}(E) \leqslant 1$$
+-   Betting analogy: payoff from a \$1 bet in a (sub-)fair game
+-   Statistical interpretation: **evidence** against $H_0$
+-   Large $E$ → strong evidence against $H_0$
+-   A realisation of $E$ is an **e-value**.
+
+## Markov's inequality
+
+Let $S$ be a non-negative random variable ($S \geqslant 0$).
+
+For any $\alpha > 0$,
+$$\Pr\left(S \geqslant \frac{1}{\alpha}\right) \leqslant \alpha \cdot \mathbb{E}(S)$$
+
+Let $S = E$, an e-variable. Under $H_0$ we have:
+$$\Pr\left(E \geqslant \frac{1}{\alpha}\right) \leqslant \alpha$$
+
+
+## Testing using e-values
+
+Reject $H_0$ if $E \geqslant 1 / \alpha$
+
+Markov's inequality $\Rightarrow$ type I error control
+
+::: callout-note
+- Alternative to using a p-value
+- Generalises a likelihood ratio
+:::
+
+## Combining e-variables
+
+$A, B, C$ are e-variables
+
+$A, B, C$ independent $\Rightarrow$ the **product** is an e-variable:
+$$E = A \cdot B \cdot C$$
+
+The **average** is always an e-variable:
+$$E = \frac{A + B + C}{3}$$
+
+(Easier than combining p-values!)
+
+## E-process {.smaller}
+
+-   Similar to a test supermartingale, but more general
+-   Sequence $(E_t)$ with
+    $$\mathbb{E}_{H_0}(E_\tau) \leqslant 1, \quad \text{for all stopping times } \tau.$$
+-   Connection with TSMs:
+    $$E_t \leqslant \inf_{P \in H_0} S_t^{(P)}, \quad
+      \text{where } S_t^{(P)} \text{ is a TSM for } P.$$
+-   Betting analogy: minimum wealth across simultaneous betting games
+-   Statistical interpretation: **accumulated evidence** against $H_0$
+-   Ville's inequality applies
+-   Stop anytime → type I error control
+
+## Further reading
+
+[Chugg et al. (2026)](#references)
+
+- E-values as statistical evidence
+- Comparison with Bayes factors, likelihood ratios and p-values
+
+
+## P-values from e-values
+
+$$P_t = \frac{1}{E_t}$$
+
+$$E_t > \frac{1}{\alpha}  \quad \Longleftrightarrow \quad  P_t < \alpha $$
+
+-   $P_t$ is an *anytime-valid p-variable*.
+-   A realisation of $P_t$ is an **anytime-valid p-value**.
+
+## Confidence sequences {.smaller}
+
+Fixed-sample hypothesis test $\longleftrightarrow$ confidence interval (CI)\
+Sequential hypothesis test $\longleftrightarrow$ **confidence sequence** (CS)
+
+```{r}
+#| label: confidence-sequence-example-setup
+# Based on examples from: https://doi.org/10.31234/osf.io/h5vae_v3
+library(safestats)
+set.seed(304)
+xx <- rep(1:2, each = 40)
+yy <- rnorm(xx, mean = 1.4 * xx)
+design <- designSaviT(nPlan = c(40, 40), alpha = 0.05, testType = "twoSample")
+result <- saviTTest(xx, yy, design, sequential = TRUE)
+```
+
+::::: columns
+::: {.column width="50%"}
+```{r}
+#| label: confidence-sequence-example-plot1
+#| fig-width: 6
+#| fig-height: 5
+#| out-width: "100%"
+plot(result, xlab = "Sample size")
+grid()
+```
+:::
+
+::: {.column width="50%"}
+```{r}
+#| label: confidence-sequence-example-plot2
+#| fig-width: 6
+#| fig-height: 5
+#| out-width: "100%"
+plot(result, ylim = c(-5, 5), xlab = "Sample size", ylab = expression(theta),
+     logScale = FALSE, wantConfSeqPlot = TRUE, h0Colour = "magenta")
+grid()
+```
+:::
+:::::
+
+## Don't trust your scanner
+
+[Xerox
+bug](https://www.dkriesel.com/en/blog/2013/0802_xerox-workcentres_are_switching_written_numbers_when_scanning)
+:bug::
+
+::::: columns
+::: {.column width="50%"}
+![](https://www.dkriesel.com/_media/blog/2013/kostreg-vorher.png){fig-align="center"
+width="80%"}
+:::
+
+::: {.column width="50%"}
+![](https://www.dkriesel.com/_media/blog/2013/kostreg-nachher.png){fig-align="center"
+width="80%"}
+:::
+:::::
+
+::: footer
+Source: <https://www.dkriesel.com/>
+:::
+
+## AWAIRE performance
+
+![](images/awaire-results.png)
+
+::: footer
+[Ek et al. (2023)](#references)
+:::
+
+## "E-hacking"
+
+Reanalysing the data with different test statistics ("betting strategies") and
+only reporting the best one.
+
+This is **not** safe stats.
+
+Fundamental principle:
+
+> Declare your bet before you play.
+
+Pre-registration is still an important tool.
+
+However, anytime-valid methods retain flexibility even after pre-specification.
+
+## Research frontiers, in sequential analysis
+
+-   Improving efficiency ("power")
+-   Complex, high-dimensional models
+-   Beyond iid/exchangeable data
+-   Connections with Bayesian approaches
